@@ -1,0 +1,359 @@
+---
+title: "UNDP"
+author: "Anshul Kamble"
+date: "2024-10-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading libraries
+```{r, echo = FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(leaflet)
+library(sf)
+library(tmap)
+library(readxl)
+library(openxlsx)
+library(tidygeocoder)
+library(leaflet.extras)
+
+
+file.exists("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/sudan_hrp_demonstration_events_by_month-year_as-of-10oct2024.xlsx")
+
+```
+## Loading datasets
+```{r, echo=FALSE}
+demonstration_data <- read_excel("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/file1.xlsx", sheet = "Data")
+civilian_targeting_data <- read_excel("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/file2.xlsx", sheet = "Data")
+political_violence_data <- read_excel("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/file3.xlsx", sheet = "Data")
+
+```
+
+## Structure of datasets
+```{r}
+str(demonstration_data)
+str(civilian_targeting_data)
+str(political_violence_data)
+```
+## Conflict and Violence Analysis
+## a) Profile and Nature of Violence - using bar plot
+```{r}
+# Summarizing the demonstration data
+demo_summary <- demonstration_data %>%
+  summarise(total_events = sum(Events), total_fatalities = sum(Fatalities)) %>%
+  mutate(violence_type = "Demonstration")
+
+# Summarizing the civilian targeting data
+civilian_summary <- civilian_targeting_data %>%
+  summarise(total_events = sum(Events)) %>%
+  mutate(violence_type = "Civilian Targeting")
+
+# Summarizing the political violence data
+political_summary <- political_violence_data %>%
+  summarise(total_events = sum(Events), total_fatalities = sum(Fatalities)) %>%
+  mutate(violence_type = "Political Violence")
+
+# Combine all summaries
+violence_profile <- bind_rows(demo_summary, civilian_summary, political_summary)
+
+# Visualizing the types and frequencies of violence
+ggplot(violence_profile, aes(x = violence_type, y = total_events, fill = violence_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Profile and Nature of Violence in Sudan", x = "Type of Violence", y = "Total Events") +
+  theme_minimal()
+
+
+
+```
+## b) Identifying major conflict hotspots -using OSM geocoding
+```{r}
+# Example: Geocoding the demonstration data using Admin1 (regions)
+# Summarize the data by region to reduce the number of requests
+demo_hotspot <- demonstration_data %>%
+  group_by(Admin1) %>%
+  summarise(total_events = sum(Events)) %>%
+  filter(total_events > 0)  # Only include regions with events
+# Geocode the Admin1 regions to get latitude and longitude
+geo_data <- demo_hotspot %>%
+  geocode(Admin1, method = 'osm', lat = Latitude, long = Longitude)
+#head(geo_data)
+
+# Summarize civilian targeting data by region (Admin1)
+civilian_hotspot <- civilian_targeting_data %>%
+  group_by(Admin1) %>%
+  summarise(total_events = sum(Events)) %>%
+  filter(total_events > 0)
+# Geocode Admin1 regions for civilian targeting data
+civilian_geo_data <- civilian_hotspot %>%
+  geocode(Admin1, method = 'osm', lat = Latitude, long = Longitude)
+#head(civilian_geo_data)
+
+# Summarize political violence data by region (Admin1)
+political_hotspot <- political_violence_data %>%
+  group_by(Admin1) %>%
+  summarise(total_events = sum(Events)) %>%
+  filter(total_events > 0)
+# Geocode Admin1 regions for political violence data
+political_geo_data <- political_hotspot %>%
+  geocode(Admin1, method = 'osm', lat = Latitude, long = Longitude)
+#head(political_geo_data)
+
+# Combine the three datasets
+combined_geo_data <- bind_rows(
+  geo_data %>% mutate(violence_type = "Demonstration"),
+  civilian_geo_data %>% mutate(violence_type = "Civilian Targeting"),
+  political_geo_data %>% mutate(violence_type = "Political Violence")
+)
+#head(combined_geo_data)
+
+
+# Create an interactive leaflet map of all the conflict hotspots
+leaflet() %>%
+  addTiles() %>%
+  
+  # Demonstration layer
+  addCircleMarkers(data = filter(combined_geo_data, violence_type == "Demonstration"),
+                   lng = ~Longitude, lat = ~Latitude, group = "Demonstration",
+                   radius = ~log(total_events + 1) * 5, color = "blue", fillOpacity = 0.7,
+                   popup = ~paste0("Region: ", Admin1, "<br>Events: ", total_events)) %>%
+  
+  # Civilian Targeting layer
+  addCircleMarkers(data = filter(combined_geo_data, violence_type == "Civilian Targeting"),
+                   lng = ~Longitude, lat = ~Latitude, group = "Civilian Targeting",
+                   radius = ~log(total_events + 1) * 5, color = "green", fillOpacity = 0.7,
+                   popup = ~paste0("Region: ", Admin1, "<br>Events: ", total_events)) %>%
+  
+  # Political Violence layer
+  addCircleMarkers(data = filter(combined_geo_data, violence_type == "Political Violence"),
+                   lng = ~Longitude, lat = ~Latitude, group = "Political Violence",
+                   radius = ~log(total_events + 1) * 5, color = "red", fillOpacity = 0.7,
+                   popup = ~paste0("Region: ", Admin1, "<br>Events: ", total_events)) %>%
+  
+  # Add layer controls
+  addLayersControl(
+    overlayGroups = c("Demonstration", "Civilian Targeting", "Political Violence"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  
+  # Add legend
+  addLegend("bottomright", title = "Conflict Hotspots", colors = c("blue", "green", "red"), 
+            labels = c("Demonstration", "Civilian Targeting", "Political Violence"), opacity = 0.7)
+
+```
+
+## main parties involved - using new dataset
+```{r}
+acled_data <- read_excel("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/file4.xlsx")
+str(acled_data)
+```
+
+## summarizing the main actors
+```{r}
+# Combine actor1 and actor2 to get a full list of actors involved
+actors_combined <- acled_data %>%
+  select(event_id_cnty, actor1, actor2) %>%
+  gather(key = "actor_type", value = "actor", actor1, actor2) %>%
+  filter(!is.na(actor))  # Remove NA actors
+
+# Ensure each event is counted only once for each actor by removing duplicate event IDs
+actors_summary <- actors_combined %>%
+  group_by(actor, event_id_cnty) %>%
+  summarise(event_count = n()) %>%
+  group_by(actor) %>%
+  summarise(total_events = sum(event_count)) %>%
+  arrange(desc(total_events))
+
+# View the top actors to ensure the event count is correct
+#head(actors_summary, 10)
+
+# Filter the top 10 actors
+top_actors <- actors_summary %>% top_n(10, total_events)
+
+# Plot the top actors involved in conflict
+ggplot(top_actors, aes(x = reorder(actor, total_events), y = total_events, fill = actor)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top Actors Involved in Conflict in Sudan", x = "Actor", y = "Number of Events") +
+  theme_minimal()
+
+
+```
+## extra - which two actors are against each other the most
+```{r}
+# Summarize interaction types
+interaction_summary <- acled_data %>%
+  group_by(interaction) %>%
+  summarise(total_events = n()) %>%
+  arrange(desc(total_events))
+
+# View the interaction summary
+head(interaction_summary)
+
+ggplot(interaction_summary, aes(x = reorder(interaction, -total_events), y = total_events, fill = interaction)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Total Events by Interaction Type", x = "Interaction Type", y = "Total Events") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_discrete(name = "Interaction Types")
+
+```
+
+## visualizing trends over time
+```{r}
+# Convert the event_date column to Date format if it's not already
+acled_data$event_date <- as.Date(acled_data$event_date)
+
+# Summarize the total number of events by year
+yearly_trend <- acled_data %>%
+  mutate(year = format(event_date, "%Y")) %>%
+  group_by(year) %>%
+  summarise(total_events = n()) %>%
+  arrange(year)
+
+# View the summarized yearly trends
+#head(yearly_trend)
+
+# Plot the trend of total events over time (yearly)
+ggplot(yearly_trend, aes(x = as.numeric(year), y = total_events)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red", size = 2) +
+  labs(title = "Yearly Trend of Conflict Events in Sudan", x = "Year", y = "Total Events") +
+  theme_minimal()
+
+```
+
+# reason - dissolving of civilan-led government by Omar al-Bashir in Oct 21
+
+
+## extra - Comparing Actors Involved Over Time
+```{r}
+# Summarize the total number of events involving specific actors by year
+actor_trend <- acled_data %>%
+  mutate(year = format(event_date, "%Y")) %>%
+  group_by(year, actor1) %>%
+  summarise(total_events = n()) %>%
+  arrange(year)
+
+# Plot the trend of total events for the top actors over time
+ggplot(actor_trend %>% filter(actor1 %in% c("Police Forces of Sudan", "Rioters (Sudan)", "Protesters (Sudan)")), 
+       aes(x = as.numeric(year), y = total_events, color = actor1)) +
+  geom_line(size = 1) +
+  labs(title = "Yearly Trend of Conflict Events by Actors in Sudan", x = "Year", y = "Total Events") +
+  theme_minimal()
+
+```
+
+## refugee connection to political violence
+```{r}
+# Convert the relevant columns to lowercase for consistency in merging
+conflict_data <- acled_data %>%
+  mutate(admin1 = tolower(admin1)) %>%
+  group_by(admin1) %>%
+  summarise(Conflict_Events = n()) %>%
+  arrange(desc(Conflict_Events))
+
+# Select the top 20 worst-hit cities based on conflict events
+top_5_conflict_data <- conflict_data %>% top_n(20, Conflict_Events)
+
+# taken from UNHCR
+refugee_data <- data.frame(
+  `Location name` = c("South Darfur", "North Darfur", "Central Darfur", "Nile", "East Darfur", "Gedaref", 
+                      "White Nile", "Sennar", "South Kordofan", "Aj Jazirah", "Northern", "Blue Nile", 
+                      "West Kordofan", "West Darfur", "Red Sea", "Kassala", "North Kordofan", "Khartoum"),
+  Source = rep("Humanitarian Needs Overview", 18),
+  `Data date` = rep("30 Jun 2024", 18),
+  Population = c(1823740, 1488364, 869468, 765875, 763773, 656625, 647972, 564510, 443988, 398919, 
+                 397589, 310479, 309858, 293932, 261683, 239074, 197294, 107072)
+)
+# Convert the 'Location.name' in refugee_data to lowercase to match with admin1
+refugee_data <- refugee_data %>%
+  mutate(Location.name = tolower(Location.name))
+
+# Merge the top 20 conflict-hit regions with the refugee data
+top_5_merged_data <- merge(refugee_data, top_5_conflict_data, by.x = "Location.name", by.y = "admin1")
+
+# Create a scatter plot for the top 5 worst-hit cities with labels
+ggplot(top_5_merged_data, aes(x = Conflict_Events, y = Population, color = Location.name, label = Location.name)) +
+  geom_point(size = 5) +  # Larger points for emphasis
+  geom_text(vjust = -1, hjust = 0.5, size = 4) +  # Add labels for the regions
+  labs(title = "Top 5 Worst-Hit Cities: Political Violence vs. Refugee Population",
+       x = "Conflict Events", y = "Refugee Population") +
+  theme_minimal() +
+  theme(legend.position = "none") +  # Remove legend for clarity
+  geom_smooth(method = "lm", se = FALSE, color = "black")  # Add trend line
+
+
+
+```
+## food insecurity (millet and wheat) vs Political violence
+```{r}
+
+# Load the data from the Excel file
+food_insecurity_data <- read_excel("C:/Users/HP/OneDrive/Desktop/ASU/SEM 5/DAT 301/UNDP/Wheat_and_Millet_Prices_Data.xlsx")
+
+# Ensure the food insecurity data has the correct months in abbreviated form
+food_insecurity_data$Month <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Assume conflict data is already loaded as acled_data and has a column event_date
+# Convert the event_date to Date format
+acled_data$event_date <- as.Date(acled_data$event_date)
+
+# Extract the month from event_date
+acled_data$Month <- format(acled_data$event_date, "%b")
+
+# Summarize the total conflict events by month
+conflict_monthly <- acled_data %>%
+  group_by(Month) %>%
+  summarise(Conflict_Events = n())
+
+# Create a full sequence of months to ensure complete coverage
+full_months <- data.frame(Month = factor(c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+                                         levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+
+# Merge conflict data with full months to handle missing months
+conflict_monthly <- merge(full_months, conflict_monthly, by = "Month", all.x = TRUE)
+
+# Merge food price data with full months to handle missing months
+food_insecurity_data <- merge(full_months, food_insecurity_data, by = "Month", all.x = TRUE)
+
+# Merge conflict data and food insecurity data together
+merged_data <- merge(conflict_monthly, food_insecurity_data, by = "Month")
+
+# Check the merged data to ensure all months are included
+print(merged_data)
+
+# Create dual-axis plots
+
+# Plot political violence and wheat prices over time
+ggplot(merged_data, aes(x = Month)) +
+  geom_bar(aes(y = Conflict_Events), stat = "identity", fill = "red", alpha = 0.6) +  # Bar plot for political violence
+  geom_line(aes(y = Wheat_Current_Year / 10, color = "Wheat Prices"), size = 1.5) +  # Line plot for wheat prices
+  scale_y_continuous(
+    name = "Political Violence (Events)", 
+    sec.axis = sec_axis(~.*10, name = "Wheat Prices")  # Adjust scale for wheat prices
+  ) +
+  labs(title = "Political Violence vs Wheat Prices Over Time",
+       x = "Month", color = "Legend") +
+  theme_minimal()
+
+# Plot political violence and millet prices over time
+ggplot(merged_data, aes(x = Month)) +
+  geom_bar(aes(y = Conflict_Events), stat = "identity", fill = "red", alpha = 0.6) +  # Bar plot for political violence
+  geom_line(aes(y = Millet_Current_Year / 10, color = "Millet Prices"), size = 1.5) +  # Line plot for millet prices
+  scale_y_continuous(
+    name = "Political Violence (Events)", 
+    sec.axis = sec_axis(~.*10, name = "Millet Prices")  # Adjust scale for millet prices
+  ) +
+  labs(title = "Political Violence vs Millet Prices Over Time",
+       x = "Month", color = "Legend") +
+  theme_minimal()
+
+```
+
