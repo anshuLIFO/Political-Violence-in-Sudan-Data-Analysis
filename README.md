@@ -4,7 +4,7 @@
 This project analyzes the relationship between political violence and food insecurity using publicly available UNDP and conflict datasets, with a focus on temporal and regional trends.
 
 ## Tools
-R, tidyverse, ggplot2, tmap
+R, tidyverse, ggplot2, tmap, shiny, geoplot, RStudio
 
 ## Key Work
 - Cleaned and merged large socio-economic and conflict datasets
